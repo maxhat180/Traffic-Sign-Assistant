@@ -66,6 +66,78 @@ static void reject(const char *data, size_t length)
 
 #define REJECT(data) reject(data, sizeof(data) - 1U)
 
+static void test_processing(void)
+{
+    unsigned char colors[] = {255,0,0, 0,255,0, 0,0,255, 255,255,255, 0,0,0, 77,77,77};
+    Frame source = {3, 2, 255, colors}; /* Borrowed test storage; do not destroy. */
+    const unsigned char original[] = {255,0,0, 0,255,0, 0,0,255, 255,255,255, 0,0,0, 77,77,77};
+    const char *error = NULL;
+    Frame result = {0};
+    CHECK(frame_resize(&source, 3, 2, &result, &error));
+    CHECK(result.pixels != source.pixels);
+    CHECK(memcmp(result.pixels, original, sizeof original) == 0);
+    frame_destroy(&result);
+    /* Odd ratios: 3 -> 5 chooses [0,0,1,1,2]; 2 -> 3 chooses [0,0,1]. */
+    CHECK(frame_resize(&source, 5, 3, &result, &error));
+    const size_t columns[] = {0,0,1,1,2};
+    const size_t rows[] = {0,0,1};
+    for (size_t y = 0; y < 3; ++y) {
+        for (size_t x = 0; x < 5; ++x) {
+            CHECK(memcmp(result.pixels + (y * 5U + x) * 3U,
+                         original + (rows[y] * 3U + columns[x]) * 3U, 3U) == 0);
+        }
+    }
+    frame_destroy(&result);
+    CHECK(frame_resize(&source, 2, 1, &result, &error));
+    CHECK(memcmp(result.pixels, original, 6U) == 0);
+    frame_destroy(&result);
+    CHECK(frame_resize(&source, 1, 1, &result, &error));
+    CHECK(memcmp(result.pixels, original, 3U) == 0);
+    frame_destroy(&result);
+    CHECK(memcmp(source.pixels, original, sizeof original) == 0);
+    CHECK(!frame_resize(&source, 0, 2, &result, &error));
+    CHECK(!frame_resize(&source, SIZE_MAX, 2, &result, &error));
+    CHECK(!frame_resize(&source, SIZE_MAX / 3U + 1U, 1, &result, &error));
+    CHECK(result.pixels == NULL && result.width == 0);
+    CHECK(!frame_resize(&source, 1, 1, &source, &error));
+    CHECK(frame_grayscale(&source, &error));
+    const unsigned char gray[] = {76,150,29,255,0,77};
+    for (size_t i = 0; i < sizeof gray; ++i) {
+        CHECK(colors[i * 3U] == gray[i]);
+        CHECK(colors[i * 3U + 1U] == gray[i]);
+        CHECK(colors[i * 3U + 2U] == gray[i]);
+    }
+    CHECK(frame_grayscale(&source, &error)); /* Idempotent. */
+    CHECK(colors[0] == 76 && colors[3] == 150);
+
+    FILE *file = fixture("", 0);
+    CHECK(frame_write_ppm(file, &source, &error));
+    CHECK(fseek(file, 0L, SEEK_SET) == 0);
+    CHECK(frame_read_ppm(file, &result, &error));
+    CHECK(result.width == 3 && result.height == 2 && result.max_value == 255);
+    CHECK(memcmp(result.pixels, source.pixels, sizeof colors) == 0);
+    frame_destroy(&result);
+    CHECK(close_fixture(file) == 0);
+
+    unsigned char low[] = {15,0,0};
+    Frame low_frame = {1,1,15,low};
+    CHECK(frame_grayscale(&low_frame, &error));
+    CHECK(low[0] == 4 && low[1] == 4 && low[2] == 4);
+    CHECK(frame_resize(&low_frame, 2, 2, &result, &error));
+    CHECK(result.max_value == 15 && result.pixels[11] == 4);
+    frame_destroy(&result);
+    Frame empty = {0};
+    CHECK(!frame_grayscale(&empty, &error));
+    CHECK(!frame_resize(&empty, 1, 1, &result, &error));
+    low[2] = 16;
+    CHECK(!frame_grayscale(&low_frame, &error));
+    CHECK(low[0] == 4 && low[2] == 16); /* No partial mutation on invalid input. */
+    file = fixture("", 0);
+    CHECK(!frame_write_ppm(file, &low_frame, &error));
+    CHECK(ftell(file) == 0);
+    CHECK(close_fixture(file) == 0);
+}
+
 int main(void)
 {
     /* Binary zeros and high-bit bytes must survive unchanged, in row order. */
@@ -150,6 +222,7 @@ int main(void)
     CHECK(length > 0 && (size_t)length < sizeof overflow);
     reject(overflow, (size_t)length);
 
+    test_processing();
     printf("PASS: %u checks\n", checks);
     return EXIT_SUCCESS;
 }

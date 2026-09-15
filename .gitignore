@@ -59,3 +59,7 @@ dkms.conf
 /archive2/
 /archive.zip
 /archive2.zip
+
+# Generated local image examples and processed output
+/examples/local/
+/output/

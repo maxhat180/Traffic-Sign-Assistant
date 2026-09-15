@@ -1,7 +1,8 @@
 # Traffic Sign Assistant
 
 A C-first project toward detecting speed-limit signs from dashcam video.
-Milestone 1 is implemented: load one binary PPM image into owned RGB memory.
+Milestones 1 and 2 are implemented: load a binary PPM image, convert to grayscale,
+resize, and save a processed image using C17.
 Video decoding and sign detection are future milestones.
 
 See [PROGRESS.md](PROGRESS.md) for completed work and the proposed roadmap.
@@ -89,8 +90,8 @@ From PowerShell in this directory (GCC must be on PATH):
 Or build directly:
 
 ```sh
-gcc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror main.c frame.c -o traffic_sign_assistant.exe
-gcc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror tests/test_frame.c frame.c -o test_frame.exe
+gcc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror main.c frame.c image.c -o traffic_sign_assistant.exe
+gcc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror tests/test_frame.c frame.c image.c -o test_frame.exe
 ```
 
 On Linux/macOS, use the same commands with `cc` and run the executables using
@@ -118,6 +119,61 @@ single delimiter: CR ends the header and LF is the first pixel byte. This
 preserves valid rasters whose first channel happens to be a newline. CRLF
 between earlier header fields is supported. Do not let a text editor rewrite
 line endings in binary PPM files.
+
+## Image processing (Stage 2)
+
+```powershell
+.\traffic_sign_assistant.exe input.ppm --grayscale --output gray.ppm
+.\traffic_sign_assistant.exe input.ppm --resize 208 208 --output small.ppm
+.\traffic_sign_assistant.exe input.ppm --resize 208 208 --grayscale --output small-gray.ppm
+```
+
+All transformations require `--output`. With only an input path, the original
+metadata preview still works. `--output` alone saves a copy. An existing output
+file is overwritten; create its parent directory first. On write failure the
+output may be incomplete. Input is fully loaded and closed before output opens.
+Resize always runs before grayscale, regardless of option order. The printed
+metadata describes the resulting image.
+
+Grayscale uses `(299*R + 587*G + 114*B + 500) / 1000`, using integer division.
+The rounded value is stored in all three RGB channels, so output remains P6
+and uses three bytes per pixel. This is a display-space approximation, not a
+gamma-correct linear-light luminance calculation. Maximum color value is
+preserved, including values below 255.
+
+Resize uses nearest-neighbor sampling: `(x,y)` in the output copies input
+`(floor(x*source_width/target_width), floor(y*source_height/target_height))`.
+The implementation avoids overflowing these coordinate products. Target width
+and height are explicit; aspect ratio is not automatically preserved. Reducing
+images can lose thin detail or alias edges; interpolated/antialiased resizing is
+not implemented at this stage.
+
+`image.c` contains processing and writing. Grayscale changes the existing pixel
+buffer. Resize allocates a distinct buffer and leaves the source unchanged.
+The CLI releases the old frame and takes ownership of the resized frame. Saving
+does not transfer pixel ownership. Callers must provide buffers large enough
+for the dimensions declared in `Frame`.
+
+## Real sign examples (optional, local only)
+
+Two existing test-set images are recommended for initial inspection: a bright
+30 sign and a darker, blurrier 50 sign. See [examples/SOURCES.md](examples/SOURCES.md)
+for exact source identifiers. These illustrate processing behavior, not sign
+recognition accuracy.
+
+With the local `archive/car` dataset present on Windows:
+
+```powershell
+.\build.ps1 -Test
+.\tools\run_demo.ps1
+```
+
+The demo uses Windows System.Drawing only to prepare JPEGs as PPM and render PNG
+previews; the C application performs all resizing and grayscale operations.
+It creates `examples/local/speed30.ppm` and `speed50.ppm`, then produces 208-by-208
+PPM results and PNG previews under `output/`. It verifies every output pixel
+against the input. `tools/prepare_examples.ps1` can also run separately.
+All converted dataset copies and generated outputs are ignored by Git.
 
 ## Code and memory layout
 
@@ -147,3 +203,10 @@ checks the CLI output against the included image. Tests exclusively create
 `frame-test.tmp` in the working directory and remove it after each case; an
 existing file of that name is never overwritten. Build and test use the same
 strict compiler warnings.
+
+The combined C suite currently passes 437 checks, including grayscale reference
+values, nearest-neighbor identity/odd-ratio/up/down sampling, invalid dimensions,
+ownership, and save/reload equivalence. `tests/test_cli.ps1` adds 12 CLI cases
+and a hand-calculated byte-for-byte output check, including paths with spaces.
+Core tests require no downloaded dataset. Optional demo verification checks
+43,264 RGB pixels for each of the two local sign images.
