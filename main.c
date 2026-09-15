@@ -1,9 +1,11 @@
 #include "frame.h"
+#include "detect.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <limits.h>
 
 static bool dimension(const char *text, size_t *out)
 {
@@ -28,8 +30,12 @@ static bool dimension(const char *text, size_t *out)
 static int usage(const char *program)
 {
     fprintf(stderr, "Usage: %s <image.ppm> [--grayscale] [--resize WIDTH HEIGHT] "
-                    "[--output result.ppm]\n", program);
-    fprintf(stderr, "Transforms require --output. Resize runs before grayscale.\n");
+                    "[--output result.ppm] [--detect PREFIX]\n", program);
+    fprintf(stderr, "Grayscale requires --output; resize requires --output or --detect.\n"
+                    "Order: resize, detect on color, grayscale, save.\n");
+    fprintf(stderr, "Detector: --red-min N --red-ratio N --min-area N --min-side N\n"
+                    "          --max-aspect N --min-fill N --max-fill N --no-cleanup\n"
+                    "Ratios: red in percent; aspect/fill in per mille.\n");
     return EXIT_FAILURE;
 }
 
@@ -42,6 +48,9 @@ int main(int argc, char *argv[])
     size_t width = 0;
     size_t height = 0;
     const char *output = NULL;
+    const char *detect_prefix = NULL;
+    DetectorConfig config = detector_defaults();
+    bool detector_options = false;
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "--grayscale") == 0 && !grayscale) {
             grayscale = true;
@@ -52,11 +61,30 @@ int main(int argc, char *argv[])
             i += 2;
         } else if (strcmp(argv[i], "--output") == 0 && output == NULL && argc - i > 1) {
             output = argv[++i];
+        } else if (strcmp(argv[i], "--detect") == 0 && detect_prefix == NULL && argc - i > 1) {
+            detect_prefix = argv[++i];
+        } else if (strcmp(argv[i], "--no-cleanup") == 0) {
+            config.cleanup = false;
+            detector_options = true;
+        } else if (argc - i > 1) {
+            size_t value;
+            if (!dimension(argv[i + 1], &value) || value > UINT_MAX) { return usage(argv[0]); }
+            if (strcmp(argv[i], "--red-min") == 0) { config.red_min = (unsigned int)value; }
+            else if (strcmp(argv[i], "--red-ratio") == 0) { config.red_ratio = (unsigned int)value; }
+            else if (strcmp(argv[i], "--min-area") == 0) { config.min_area = value; }
+            else if (strcmp(argv[i], "--min-side") == 0) { config.min_side = value; }
+            else if (strcmp(argv[i], "--max-aspect") == 0) { config.max_aspect = (unsigned int)value; }
+            else if (strcmp(argv[i], "--min-fill") == 0) { config.min_fill = (unsigned int)value; }
+            else if (strcmp(argv[i], "--max-fill") == 0) { config.max_fill = (unsigned int)value; }
+            else { return usage(argv[0]); }
+            detector_options = true;
+            ++i;
         } else {
             return usage(argv[0]);
         }
     }
-    if ((grayscale || width != 0) && output == NULL) {
+    if ((grayscale && output == NULL) || (width != 0 && output == NULL && detect_prefix == NULL) ||
+        (detector_options && detect_prefix == NULL)) {
         return usage(argv[0]);
     }
     FILE *file = fopen(argv[1], "rb");
@@ -87,6 +115,18 @@ int main(int argc, char *argv[])
         }
         frame_destroy(&frame);
         frame = resized; /* Transfer the allocation's ownership. */
+    }
+    if (detect_prefix != NULL) {
+        Detection detection = {0};
+        if (!detect_signs(&frame, &config, &detection, &error) ||
+            !detection_save(&frame, &detection, detect_prefix, &error)) {
+            fprintf(stderr, "Detection failed: %s\n", error);
+            detection_destroy(&detection);
+            frame_destroy(&frame);
+            return EXIT_FAILURE;
+        }
+        printf("Components: %zu\nCandidates: %zu\n", detection.components, detection.count);
+        detection_destroy(&detection);
     }
     if (grayscale && !frame_grayscale(&frame, &error)) {
         fprintf(stderr, "Grayscale failed: %s\n", error);

@@ -1,9 +1,9 @@
 # Traffic Sign Assistant
 
 A C-first project toward detecting speed-limit signs from dashcam video.
-Milestones 1 and 2 are implemented: load a binary PPM image, convert to grayscale,
-resize, and save a processed image using C17.
-Video decoding and sign detection are future milestones.
+Milestones 1 through 3 are implemented: load a binary PPM image, convert to grayscale,
+resize, save, and locate candidate red-bordered signs using C17.
+Reading speed-limit digits and decoding video are future milestones.
 
 See [PROGRESS.md](PROGRESS.md) for completed work and the proposed roadmap.
 
@@ -90,7 +90,7 @@ From PowerShell in this directory (GCC must be on PATH):
 Or build directly:
 
 ```sh
-gcc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror main.c frame.c image.c -o traffic_sign_assistant.exe
+gcc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror main.c frame.c image.c detect.c -o traffic_sign_assistant.exe
 gcc -std=c17 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror tests/test_frame.c frame.c image.c -o test_frame.exe
 ```
 
@@ -128,11 +128,11 @@ line endings in binary PPM files.
 .\traffic_sign_assistant.exe input.ppm --resize 208 208 --grayscale --output small-gray.ppm
 ```
 
-All transformations require `--output`. With only an input path, the original
+Grayscale requires `--output`; resize requires `--output` or `--detect`. With only an input path, the original
 metadata preview still works. `--output` alone saves a copy. An existing output
 file is overwritten; create its parent directory first. On write failure the
 output may be incomplete. Input is fully loaded and closed before output opens.
-Resize always runs before grayscale, regardless of option order. The printed
+Resize always runs before detection and grayscale, regardless of option order. The printed
 metadata describes the resulting image.
 
 Grayscale uses `(299*R + 587*G + 114*B + 500) / 1000`, using integer division.
@@ -175,6 +175,86 @@ PPM results and PNG previews under `output/`. It verifies every output pixel
 against the input. `tools/prepare_examples.ps1` can also run separately.
 All converted dataset copies and generated outputs are ignored by Git.
 
+## Candidate signs (Stage 3)
+
+```powershell
+New-Item -ItemType Directory -Force output
+.\tools\prepare_examples.ps1
+.\traffic_sign_assistant.exe examples/local/speed30.ppm --detect output/speed30
+.\traffic_sign_assistant.exe examples/local/speed50.ppm --detect output/speed50
+.\tools\preview_ppm.ps1 -InputPath output/speed30-boxes.ppm -OutputPath output/speed30-boxes.png
+```
+
+`--detect PREFIX` writes `PREFIX-raw.ppm` (red mask), `PREFIX-clean.ppm`
+(cleaned mask), `PREFIX-boxes.ppm` (yellow boxes on the color input),
+`PREFIX-boxes.csv`, and `PREFIX-crop-0.ppm`, etc. CSV IDs match crop filenames.
+CSV coordinates use top-left x/y, width/height, and connected foreground area.
+Crops include a 10% margin (at least two pixels), clipped to the image edges.
+Boxes are region extents before adding that margin. Mask foreground is white.
+
+The parent directory must exist. Existing output names are overwritten; errors
+can leave partial outputs. Old crop files from a previous run are not deleted:
+use the current CSV as the candidate list, or choose a new prefix per run.
+Zero candidates is a successful result with a header-only CSV and no new crops.
+
+The pipeline in `detect.c`:
+
+1. Compare R against both G and B and require minimum red brightness, scaled
+   for the frame's maximum color value. Black, gray, and white are excluded.
+2. Remove isolated foreground pixels, then close small gaps using 3x3 dilation
+   followed by erosion. Image edges use truncated neighborhoods. `--no-cleanup`
+   preserves the raw mask for comparison; closing can merge very close objects.
+3. Find eight-connected regions with an iterative queue. Pixels are marked when
+   enqueued so the queue never exceeds the number of input pixels.
+4. Filter by foreground area, both box dimensions, aspect ratio, and fill fraction.
+   These are coarse shape tests, not a circle detector or a trained classifier.
+5. Save masks, candidate boxes, padded color crops, and machine-readable results.
+
+All filters are configurable. CLI values are positive integers; C API also
+allows zero minimum brightness/fill. Defaults were selected using training
+images only:
+
+| Option | Default | Meaning |
+| --- | ---: | --- |
+| `--red-min` | 40 | Minimum red brightness on a 0..255 scale |
+| `--red-ratio` | 130 | R must be at least 130% of G and B (range 101..1000) |
+| `--min-area` | 120 | Minimum connected foreground pixels |
+| `--min-side` | 12 | Minimum width and height in pixels |
+| `--max-aspect` | 2000 | Larger side / smaller side at most 2.0 (per mille) |
+| `--min-fill` | 150 | Foreground fills at least 15% of its bounding box |
+| `--max-fill` | 800 | Foreground fills at most 80% of its bounding box |
+
+Detection uses the color frame after any `--resize` and before `--grayscale`.
+Boxes therefore refer to resized coordinates if resizing was requested. Pixel
+size thresholds also apply at that resolution; lowering them may help tiny
+signs but produces more false candidates. Use the original color input when
+red borders matter; a previously saved grayscale image has lost that information.
+
+`Detection` owns two RGB masks and a candidate array; `detection_destroy` frees
+and resets it. The input is borrowed and unchanged. Temporary storage includes
+a size_t queue and two byte masks; core detection uses about 16 bytes per pixel
+on a 64-bit system, excluding the source and candidate array. Dimensions and
+allocation sizes are checked, but there is no application-specific memory cap.
+
+### Evaluation
+
+```powershell
+.\tools\evaluate_detection.ps1 -Split train
+.\tools\evaluate_detection.ps1 -Split valid
+```
+
+This optional Windows script uses the local dataset and selects 12 deterministic
+images per split: three each with small, medium, and large speed-sign boxes, and
+three without labeled speed signs. It saves manifests, per-image CSVs, summaries,
+and detector outputs under `output/`. Only training results were used to choose
+defaults. See [Stage 3 evaluation](docs/STAGE3_EVALUATION.md) for results and
+limitations. JPEG decoding and PNG preview use System.Drawing; detection is C.
+
+Stage 4 is the proposed point to add a C++/OpenCV adapter for JPEG/PNG input and
+crop rectification before digit recognition. Preserve this C implementation and
+its regression tests as a baseline. OpenCV's common BGR layout must be converted
+explicitly to this project's RGB layout at that boundary.
+
 ## Code and memory layout
 
 `main.c` owns the file stream, prints metadata and up to five pixels, and frees
@@ -204,9 +284,14 @@ checks the CLI output against the included image. Tests exclusively create
 existing file of that name is never overwritten. Build and test use the same
 strict compiler warnings.
 
-The combined C suite currently passes 437 checks, including grayscale reference
+The frame/processing C suite passes 437 checks, including grayscale reference
 values, nearest-neighbor identity/odd-ratio/up/down sampling, invalid dimensions,
-ownership, and save/reload equivalence. `tests/test_cli.ps1` adds 12 CLI cases
+ownership, and save/reload equivalence. `tests/test_cli.ps1` adds 18 CLI cases
 and a hand-calculated byte-for-byte output check, including paths with spaces.
 Core tests require no downloaded dataset. Optional demo verification checks
 43,264 RGB pixels for each of the two local sign images.
+
+`tests/test_detect.c` adds 32 detector checks for empty masks, rings, small gaps,
+isolated noise, border-touching objects, solid and elongated objects, diagonal
+connectivity, candidate-array growth, normalized color values, invalid input,
+and cleanup. CLI tests also verify box coordinates and every padded crop pixel.
