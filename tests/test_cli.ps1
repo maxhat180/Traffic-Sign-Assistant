@@ -1,8 +1,12 @@
+param([string]$Executable)
+
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $testDirectory = Join-Path $projectRoot ('output/test-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $testDirectory -Force)
-$executable = Join-Path $projectRoot 'traffic_sign_assistant.exe'
+$executable = if ($Executable) { $Executable } else {
+    Join-Path $projectRoot 'traffic_sign_assistant.exe'
+}
 $inputImage = Join-Path $projectRoot 'examples/tiny.ppm'
 $resultImage = Join-Path $testDirectory 'gray resized.ppm'
 $script:caseCount = 0

@@ -13,6 +13,10 @@ typedef struct {
     unsigned char *pixels;
 } Frame;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Read one P6 frame with max_value 1..255 at the current stream position.
  * file, out and error must be non-NULL; out must be initialized to {0}.
  * The caller owns and closes file. On success, the caller owns out->pixels.
@@ -39,5 +43,9 @@ bool frame_resize(const Frame *src, size_t width, size_t height,
 
 /* Free the pixel allocation and reset the frame. Safe to repeat. */
 void frame_destroy(Frame *frame);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

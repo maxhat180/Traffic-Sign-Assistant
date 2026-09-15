@@ -4,9 +4,11 @@ Last updated: 2026-09-15
 
 ## Current status
 
-Milestones 1 through 3 are complete. Stage 3 is an evaluated coarse candidate
-detector, not a reliable sign recognizer. Stage 4 is next; add a C++/OpenCV
-adapter before implementing digit recognition.
+Milestones 1 through 3 are complete. Stage 4 is in progress. The mixed C/C++
+boundary, CMake build, BGR-to-RGB bridge, and optional OpenCV decode/perspective
+adapter are implemented. A compiler-matched OpenCV 4.13.0 build verifies PNG/JPEG
+decoding and perspective normalization locally. Digit recognition, automatic
+corner estimation, and confidence calibration remain.
 
 ## Milestones
 
@@ -20,6 +22,7 @@ adapter before implementing digit recognition.
   connected pixels, filter by shape and size, and output candidate crops.
 - [ ] **4. Recognize speed limits.** Select an OCR or recognition library and
   report the speed and confidence, with an unknown result when uncertain.
+  In progress: mixed C/C++ architecture and the image/geometry adapter are added.
 - [ ] **5. Process video.** Add a decoder, sample frames, and reuse the
   still-image pipeline.
 - [ ] **6. Track results over time.** Combine detections across frames to reduce
@@ -69,6 +72,27 @@ See [README.md](README.md) for input constraints and memory ownership details.
   candidates from other objects. See docs/STAGE3_EVALUATION.md.
 - Datasets and all generated artifacts remain local and ignored by Git.
 - Next: C++/OpenCV image input and geometric normalization, then digit recognition.
+
+## Stage 4 progress
+
+- Added a C-compatible `image_adapter.h` boundary. Existing C headers now use
+  C++ linkage guards, while no OpenCV or C++ type leaks into the C core.
+- Added a dependency-free C++ BGR-to-RGB bridge plus 18 checks for exact channel
+  order, padded row stride, failure atomicity, and C/C++ allocation ownership.
+- Added optional OpenCV JPEG/PNG loading and four-point perspective normalization.
+  Exceptions are contained inside the adapter and mapped to static diagnostics.
+- Added CMake targets for the C17 core, C++17 bridge, CLI, and all tests. A
+  dependency-free CMake/Ninja build passes four test targets; the legacy strict
+  C17 build still passes 437 core checks, 18 CLI cases, and 32 detector checks.
+- Built OpenCV 4.13.0 locally with the same MinGW compiler. The mandatory-OpenCV
+  configuration compiles and links the adapter with strict warnings and passes
+  five CTest targets. Its 33 adapter checks cover exact PNG-to-RGB decoding,
+  known quadrilateral rectification, invalid geometry, and failure atomicity.
+- A real 416x416 validation JPEG also loads through the OpenCV-backed CLI.
+- Added `tools/build_opencv.ps1` to reproduce the minimal compiler-compatible
+  dependency under ignored `output/deps` from a fresh checkout.
+- Next: estimate sign corners automatically, extract normalized inner sign
+  regions, then choose and evaluate recognition and confidence thresholds.
 
 ## Update convention
 

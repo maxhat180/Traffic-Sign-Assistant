@@ -26,6 +26,10 @@ typedef struct {
     size_t components;
 } Detection;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 DetectorConfig detector_defaults(void);
 /* Source is borrowed, valid packed RGB. out must be initialized to {0}.
  * On success out owns its masks and candidate array. On failure out is unchanged.
@@ -41,5 +45,9 @@ void detection_destroy(Detection *detection);
  */
 bool detection_save(const Frame *source, const Detection *detection,
                     const char *prefix, const char **error);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

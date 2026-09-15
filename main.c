@@ -1,5 +1,8 @@
 #include "frame.h"
 #include "detect.h"
+#ifdef TRAFFIC_SIGN_WITH_OPENCV
+#include "image_adapter.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -87,13 +90,20 @@ int main(int argc, char *argv[])
         (detector_options && detect_prefix == NULL)) {
         return usage(argv[0]);
     }
+    Frame frame = {0};
+    const char *error = NULL;
+#ifdef TRAFFIC_SIGN_WITH_OPENCV
+    const bool loaded = frame_read_image(argv[1], &frame, &error);
+    if (!loaded) {
+        fprintf(stderr, "Could not load image: %s\n", error);
+        return EXIT_FAILURE;
+    }
+#else
     FILE *file = fopen(argv[1], "rb");
     if (file == NULL) {
         perror("Could not open image");
         return EXIT_FAILURE;
     }
-    Frame frame = {0};
-    const char *error = NULL;
     const bool loaded = frame_read_ppm(file, &frame, &error);
     const int close_result = fclose(file);
     if (!loaded) {
@@ -106,6 +116,7 @@ int main(int argc, char *argv[])
         frame_destroy(&frame);
         return EXIT_FAILURE;
     }
+#endif
     if (width != 0) {
         Frame resized = {0};
         if (!frame_resize(&frame, width, height, &resized, &error)) {
@@ -153,7 +164,11 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
     }
+#ifdef TRAFFIC_SIGN_WITH_OPENCV
+    printf("Format: OpenCV-decoded RGB\nWidth: %zu\nHeight: %zu\nMaximum color value: %u\n",
+#else
     printf("Format: P6\nWidth: %zu\nHeight: %zu\nMaximum color value: %u\n",
+#endif
            frame.width, frame.height, frame.max_value);
     printf("RGB bytes: %zu\n", frame.width * frame.height * 3U);
     const size_t count = frame.width * frame.height;
