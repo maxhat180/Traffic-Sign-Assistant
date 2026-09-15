@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Local datasets and downloaded archives
+/archive/
+/archive2/
+/archive.zip
+/archive2.zip
