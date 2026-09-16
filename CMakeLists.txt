@@ -33,7 +33,7 @@ add_executable(traffic_sign_assistant main.c)
 target_link_libraries(traffic_sign_assistant PRIVATE traffic_sign_core)
 traffic_sign_warnings(traffic_sign_assistant)
 
-find_package(OpenCV QUIET COMPONENTS core imgcodecs imgproc)
+find_package(OpenCV QUIET COMPONENTS core imgcodecs imgproc ml)
 if(OpenCV_FOUND)
     add_library(traffic_sign_opencv STATIC cpp/opencv_adapter.cpp)
     target_include_directories(traffic_sign_opencv PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -43,6 +43,26 @@ if(OpenCV_FOUND)
     target_link_libraries(traffic_sign_assistant PRIVATE traffic_sign_opencv)
     target_compile_definitions(traffic_sign_assistant PRIVATE
         TRAFFIC_SIGN_WITH_OPENCV=1)
+
+    add_library(traffic_sign_recognizer STATIC
+        cpp/recognizer.cpp cpp/recognizer_features.cpp)
+    target_include_directories(traffic_sign_recognizer PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(traffic_sign_recognizer PRIVATE
+        ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(traffic_sign_recognizer PUBLIC
+        traffic_sign_core ${OpenCV_LIBS})
+    traffic_sign_warnings(traffic_sign_recognizer)
+    target_link_libraries(traffic_sign_assistant PRIVATE traffic_sign_recognizer)
+    target_compile_definitions(traffic_sign_assistant PRIVATE
+        TRAFFIC_SIGN_WITH_RECOGNIZER=1)
+
+    add_executable(traffic_sign_train_recognizer cpp/train_recognizer.cpp)
+    target_include_directories(traffic_sign_train_recognizer PRIVATE
+        ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(traffic_sign_train_recognizer PRIVATE
+        traffic_sign_recognizer ${OpenCV_LIBS})
+    traffic_sign_warnings(traffic_sign_train_recognizer)
     message(STATUS "OpenCV adapter enabled (${OpenCV_VERSION})")
 elseif(TRAFFIC_SIGN_REQUIRE_OPENCV)
     message(FATAL_ERROR
@@ -75,6 +95,13 @@ if(BUILD_TESTING)
             traffic_sign_opencv traffic_sign_core)
         traffic_sign_warnings(test_opencv_adapter)
         add_test(NAME opencv_adapter COMMAND test_opencv_adapter)
+
+        add_executable(test_recognizer tests/test_recognizer.cpp)
+        target_include_directories(test_recognizer PRIVATE ${OpenCV_INCLUDE_DIRS})
+        target_link_libraries(test_recognizer PRIVATE
+            traffic_sign_recognizer ${OpenCV_LIBS})
+        traffic_sign_warnings(test_recognizer)
+        add_test(NAME recognizer COMMAND test_recognizer)
     endif()
 
     find_program(POWERSHELL_EXECUTABLE NAMES pwsh powershell)

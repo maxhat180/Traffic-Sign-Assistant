@@ -3,6 +3,9 @@
 #ifdef TRAFFIC_SIGN_WITH_OPENCV
 #include "image_adapter.h"
 #endif
+#ifdef TRAFFIC_SIGN_WITH_RECOGNIZER
+#include "recognizer.h"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +33,28 @@ static bool dimension(const char *text, size_t *out)
     return value != 0;
 }
 
+#ifdef TRAFFIC_SIGN_WITH_RECOGNIZER
+static bool nonnegative_number(const char *text, size_t *out)
+{
+    size_t value = 0;
+    if (*text == '\0') {
+        return false;
+    }
+    for (; *text != '\0'; ++text) {
+        if (*text < '0' || *text > '9') {
+            return false;
+        }
+        const size_t digit = (size_t)(*text - '0');
+        if (value > (SIZE_MAX - digit) / 10U) {
+            return false;
+        }
+        value = value * 10U + digit;
+    }
+    *out = value;
+    return true;
+}
+#endif
+
 static int usage(const char *program)
 {
     fprintf(stderr, "Usage: %s <image.ppm> [--grayscale] [--resize WIDTH HEIGHT] "
@@ -39,6 +64,10 @@ static int usage(const char *program)
     fprintf(stderr, "Detector: --red-min N --red-ratio N --min-area N --min-side N\n"
                     "          --max-aspect N --min-fill N --max-fill N --no-cleanup\n"
                     "Ratios: red in percent; aspect/fill in per mille.\n");
+#ifdef TRAFFIC_SIGN_WITH_RECOGNIZER
+    fprintf(stderr, "Recognition: --recognize MODEL [--confidence N]\n"
+                    "Confidence is a minimum tree-vote share in per mille.\n");
+#endif
     return EXIT_FAILURE;
 }
 
@@ -54,6 +83,11 @@ int main(int argc, char *argv[])
     const char *detect_prefix = NULL;
     DetectorConfig config = detector_defaults();
     bool detector_options = false;
+#ifdef TRAFFIC_SIGN_WITH_RECOGNIZER
+    const char *recognition_model = NULL;
+    unsigned int recognition_confidence = 600U;
+    bool recognition_options = false;
+#endif
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "--grayscale") == 0 && !grayscale) {
             grayscale = true;
@@ -69,6 +103,20 @@ int main(int argc, char *argv[])
         } else if (strcmp(argv[i], "--no-cleanup") == 0) {
             config.cleanup = false;
             detector_options = true;
+#ifdef TRAFFIC_SIGN_WITH_RECOGNIZER
+        } else if (strcmp(argv[i], "--recognize") == 0 &&
+                   recognition_model == NULL && argc - i > 1) {
+            recognition_model = argv[++i];
+        } else if (strcmp(argv[i], "--confidence") == 0 &&
+                   !recognition_options && argc - i > 1) {
+            size_t value;
+            if (!nonnegative_number(argv[i + 1], &value) || value > 1000U) {
+                return usage(argv[0]);
+            }
+            recognition_confidence = (unsigned int)value;
+            recognition_options = true;
+            ++i;
+#endif
         } else if (argc - i > 1) {
             size_t value;
             if (!dimension(argv[i + 1], &value) || value > UINT_MAX) { return usage(argv[0]); }
@@ -90,6 +138,12 @@ int main(int argc, char *argv[])
         (detector_options && detect_prefix == NULL)) {
         return usage(argv[0]);
     }
+#ifdef TRAFFIC_SIGN_WITH_RECOGNIZER
+    if ((recognition_model != NULL && detect_prefix == NULL) ||
+        (recognition_options && recognition_model == NULL)) {
+        return usage(argv[0]);
+    }
+#endif
     Frame frame = {0};
     const char *error = NULL;
 #ifdef TRAFFIC_SIGN_WITH_OPENCV
@@ -137,6 +191,24 @@ int main(int argc, char *argv[])
             return EXIT_FAILURE;
         }
         printf("Components: %zu\nCandidates: %zu\n", detection.components, detection.count);
+#ifdef TRAFFIC_SIGN_WITH_RECOGNIZER
+        if (recognition_model != NULL) {
+            Recognizer *recognizer = recognizer_load(recognition_model,
+                                                     recognition_confidence, &error);
+            size_t known = 0;
+            if (recognizer == NULL ||
+                !recognition_save(recognizer, &frame, &detection, detect_prefix,
+                                  &known, &error)) {
+                fprintf(stderr, "Recognition failed: %s\n", error);
+                recognizer_destroy(recognizer);
+                detection_destroy(&detection);
+                frame_destroy(&frame);
+                return EXIT_FAILURE;
+            }
+            printf("Recognized: %zu\nUnknown: %zu\n", known, detection.count - known);
+            recognizer_destroy(recognizer);
+        }
+#endif
         detection_destroy(&detection);
     }
     if (grayscale && !frame_grayscale(&frame, &error)) {

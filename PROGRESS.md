@@ -1,14 +1,13 @@
 # Project progress
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 ## Current status
 
-Milestones 1 through 3 are complete. Stage 4 is in progress. The mixed C/C++
-boundary, CMake build, BGR-to-RGB bridge, and optional OpenCV decode/perspective
-adapter are implemented. A compiler-matched OpenCV 4.13.0 build verifies PNG/JPEG
-decoding and perspective normalization locally. Digit recognition, automatic
-corner estimation, and confidence calibration remain.
+Milestones 1 through 4 are complete. The still-image pipeline detects red sign
+candidates, recognizes 12 speed classes with an OpenCV random forest, and emits
+an explicit unknown result below a calibrated confidence threshold. Stage 5 is
+next: decode video frames and reuse this pipeline over time.
 
 ## Milestones
 
@@ -20,9 +19,8 @@ corner estimation, and confidence calibration remain.
   saving processed images; add real sign images with expected test outputs.
 - [x] **3. Find candidate signs in still images.** Identify red regions, group
   connected pixels, filter by shape and size, and output candidate crops.
-- [ ] **4. Recognize speed limits.** Select an OCR or recognition library and
-  report the speed and confidence, with an unknown result when uncertain.
-  In progress: mixed C/C++ architecture and the image/geometry adapter are added.
+- [x] **4. Recognize speed limits.** Classify 12 speed values, report the winning
+  tree-vote confidence, and return unknown below a measured threshold.
 - [ ] **5. Process video.** Add a decoder, sample frames, and reuse the
   still-image pipeline.
 - [ ] **6. Track results over time.** Combine detections across frames to reduce
@@ -71,9 +69,9 @@ See [README.md](README.md) for input constraints and memory ownership details.
 - Recorded perspective-related misses, merged adjacent signs, and false
   candidates from other objects. See docs/STAGE3_EVALUATION.md.
 - Datasets and all generated artifacts remain local and ignored by Git.
-- Next: C++/OpenCV image input and geometric normalization, then digit recognition.
+- Stage 4 subsequently added C++/OpenCV input, normalization, and recognition.
 
-## Stage 4 progress
+## Stage 4 verification
 
 - Added a C-compatible `image_adapter.h` boundary. Existing C headers now use
   C++ linkage guards, while no OpenCV or C++ type leaks into the C core.
@@ -83,16 +81,32 @@ See [README.md](README.md) for input constraints and memory ownership details.
   Exceptions are contained inside the adapter and mapped to static diagnostics.
 - Added CMake targets for the C17 core, C++17 bridge, CLI, and all tests. A
   dependency-free CMake/Ninja build passes four test targets; the legacy strict
-  C17 build still passes 437 core checks, 18 CLI cases, and 32 detector checks.
+  C17 build still passes 437 core checks, 23 CLI cases, and 32 detector checks.
 - Built OpenCV 4.13.0 locally with the same MinGW compiler. The mandatory-OpenCV
   configuration compiles and links the adapter with strict warnings and passes
-  five CTest targets. Its 33 adapter checks cover exact PNG-to-RGB decoding,
+  six CTest targets. Its 33 adapter checks cover exact PNG-to-RGB decoding,
   known quadrilateral rectification, invalid geometry, and failure atomicity.
 - A real 416x416 validation JPEG also loads through the OpenCV-backed CLI.
 - Added `tools/build_opencv.ps1` to reproduce the minimal compiler-compatible
   dependency under ignored `output/deps` from a fresh checkout.
-- Next: estimate sign corners automatically, extract normalized inner sign
-  regions, then choose and evaluate recognition and confidence thresholds.
+- Added 20x20 equalized grayscale features and an OpenCV `RTrees` classifier for
+  10 through 120. A C-compatible opaque recognizer keeps OpenCV types and C++
+  exceptions behind the language boundary.
+- Added a dataset trainer that filters duplicate/conflicting labels, uses a fixed
+  RNG seed, saves the forest, and reports raw and thresholded split metrics.
+- At the default 0.60 threshold, validation accepts 409/628 labeled crops with
+  100% accepted accuracy. Test accepts 293/513 with 99.0% accepted accuracy.
+- Added end-to-end frozen 12-image evaluations. Validation localizes 7/10 signs
+  and correctly recognizes 3/3 accepted localized signs; test localizes 5/9 and
+  correctly recognizes 2/2 accepted localized signs. All 52 unmatched detector
+  candidates across those runs are rejected as unknown.
+- The mandatory-OpenCV strict build passes six CTest targets. The dependency-free
+  legacy build remains supported and does not compile or link OpenCV code.
+- Remaining limitations are recorded rather than hidden: axis-aligned crops do
+  not yet estimate perspective corners automatically, the confidence is a vote
+  share rather than a calibrated probability, speed 10 has only 19 usable
+  training crops, and detector recall is the main end-to-end bottleneck.
+- Next: Stage 5 video decoding and frame sampling, followed by temporal tracking.
 
 ## Update convention
 

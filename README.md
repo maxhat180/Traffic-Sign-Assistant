@@ -1,18 +1,18 @@
 # Traffic Sign Assistant
 
 A C-first project toward detecting speed-limit signs from dashcam video.
-Milestones 1 through 3 are implemented: load a binary PPM image, convert to grayscale,
-resize, save, and locate candidate red-bordered signs using C17.
-Reading speed-limit digits and decoding video are future milestones.
+Milestones 1 through 4 are implemented: load and transform still images, locate
+red-bordered sign candidates in C17, and classify 12 speed limits with an
+OpenCV random forest behind a C API. Video decoding is the next milestone.
 
 See [PROGRESS.md](PROGRESS.md) for completed work and the proposed roadmap.
 
 ## Dataset assets
 
-The repository currently contains two extracted datasets. They are useful for
-future detector training and evaluation, but they are not direct inputs to the
-current milestone: the program only reads binary PPM images and does not yet
-decode JPEG images or MP4 video. Neither folder contains trained model weights.
+The repository currently contains two extracted datasets. The OpenCV build can
+read their JPEG images directly and uses `archive/car/` to train and evaluate
+the Stage 4 recognizer. The datasets and generated model remain local and are
+ignored by Git; neither dataset folder contains pretrained weights.
 
 ### `archive/`
 
@@ -141,12 +141,37 @@ ctest --test-dir output/cmake-opencv --output-on-failure
 ```
 
 The helper downloads the official tagged source and builds only the modules used
-here. Source, build products, and the local install stay under ignored `output/`.
+here (`core`, `imgproc`, `imgcodecs`, and `ml`). Source, build products, and the
+local install stay under ignored `output/`.
 
 The OpenCV binaries must match the selected compiler, architecture, and runtime.
 In particular, an MSVC-built Windows package cannot be linked safely into this
 project's current MinGW build. With the adapter enabled, the same CLI accepts
 OpenCV-supported color images such as JPEG and PNG as well as PPM.
+
+### Train and run recognition
+
+After the OpenCV build, train the 12-class model from the main dataset:
+
+```powershell
+.\output\cmake-opencv\traffic_sign_train_recognizer.exe `
+  .\archive\car .\output\speed-recognizer.yml
+```
+
+Then run detection and recognition together:
+
+```powershell
+.\output\cmake-opencv\traffic_sign_assistant.exe input.jpg `
+  --detect .\output\result `
+  --recognize .\output\speed-recognizer.yml `
+  --confidence 600
+```
+
+`--confidence` is the minimum winning-tree vote share in per mille (`0..1000`)
+and defaults to 600. In addition to detector artifacts, recognition writes
+`PREFIX-recognition.csv` with each candidate's box, speed, confidence, and
+known/unknown decision. Unknown rows use speed 0. The current recognizer uses a
+20-by-20 equalized grayscale feature vector from the inner candidate crop.
 
 The included 2-by-2 fixture has these RGB values in row order:
 `(82,71,66)`, `(49,50,51)`, `(97,98,99)`, `(100,101,102)`.
@@ -299,10 +324,18 @@ and detector outputs under `output/`. Only training results were used to choose
 defaults. See [Stage 3 evaluation](docs/STAGE3_EVALUATION.md) for results and
 limitations. JPEG decoding and PNG preview use System.Drawing; detection is C.
 
-Stage 4 now has a C++/OpenCV adapter for JPEG/PNG input and perspective
-rectification before digit recognition. The OpenCV-dependent target is enabled
-only when CMake finds a compatible installation. The adapter explicitly converts
-OpenCV's BGR decoding layout to this project's RGB layout.
+Stage 4 recognition evaluation uses the OpenCV build and trained model:
+
+```powershell
+.\tools\evaluate_recognition.ps1 -Split valid
+.\tools\evaluate_recognition.ps1 -Split test
+```
+
+The script freezes 12 images per split across small, medium, large, and negative
+strata, performs IoU matching, and reports localization, accepted recognition,
+unknown, and false-candidate results. See
+[Stage 4 recognition](docs/STAGE4_RECOGNITION.md) for the measured results and
+limitations.
 
 ## Code and memory layout
 
@@ -315,7 +348,12 @@ frame.h, detect.h              C API with C++ linkage guards
 image_adapter.h                C-compatible C/C++ boundary
 cpp/image_bridge.cpp           dependency-free BGR-to-RGB ownership bridge
 cpp/opencv_adapter.cpp         OpenCV decoding and perspective normalization
+cpp/recognizer_features.cpp    inner-crop grayscale feature extraction
+cpp/recognizer.cpp             C API over OpenCV random-forest inference
+cpp/train_recognizer.cpp       dataset loader, trainer, and crop evaluation
+recognizer.h                    C-compatible recognition boundary
 tools/build_opencv.ps1         reproducible local MinGW OpenCV dependency build
+tools/evaluate_recognition.ps1 frozen end-to-end Stage 4 evaluation
 tests/*.c                      C regression tests
 tests/test_image_bridge.cpp    C++ ABI, channel-order, stride, ownership test
 CMakeLists.txt                 mixed build and optional dependency discovery
@@ -324,8 +362,8 @@ CMakeLists.txt                 mixed build and optional dependency discovery
 OpenCV types do not cross `image_adapter.h`. The exported functions use plain C
 structures and `extern "C"`, while C++ exceptions are caught inside the adapter
 and converted to the existing static error-string convention. See
-[`docs/STAGE4_ARCHITECTURE.md`](docs/STAGE4_ARCHITECTURE.md) for the target graph,
-build modes, and remaining Stage 4 work.
+[`docs/STAGE4_ARCHITECTURE.md`](docs/STAGE4_ARCHITECTURE.md) for the target graph
+and build modes.
 
 `main.c` owns the file stream, prints metadata and up to five pixels, and frees
 the loaded frame. `frame.c` parses the header, checks numeric and allocation
@@ -356,7 +394,7 @@ strict compiler warnings.
 
 The frame/processing C suite passes 437 checks, including grayscale reference
 values, nearest-neighbor identity/odd-ratio/up/down sampling, invalid dimensions,
-ownership, and save/reload equivalence. `tests/test_cli.ps1` adds 18 CLI cases
+ownership, and save/reload equivalence. `tests/test_cli.ps1` adds 23 CLI cases
 and a hand-calculated byte-for-byte output check, including paths with spaces.
 Core tests require no downloaded dataset. Optional demo verification checks
 43,264 RGB pixels for each of the two local sign images.
@@ -370,5 +408,8 @@ exact RGB channel order, metadata, invalid stride behavior, and allocation
 ownership across the C++ producer/C destructor boundary.
 When OpenCV is enabled, `tests/test_opencv_adapter.cpp` adds 33 checks for exact
 PNG decoding, RGB preservation, a known perspective rectification, invalid
-corner data, and failure atomicity. The locally built OpenCV 4.13.0 configuration
-passes all five CTest targets and also loads a real 416-by-416 dataset JPEG.
+corner data, and failure atomicity. `tests/test_recognizer.cpp` trains a small
+synthetic forest and verifies feature extraction, model loading, C inference,
+confidence, CSV output, and invalid thresholds. The locally built OpenCV 4.13.0
+configuration passes all six CTest targets and also loads a real 416-by-416
+dataset JPEG.

@@ -2,21 +2,18 @@
 
 ## Status
 
-Stage 4 is in progress. The first slice establishes and tests the language
-boundary, adds optional OpenCV image decoding and quadrilateral rectification,
-and introduces CMake without removing the original C-only build. OpenCV 4.13.0
-was built locally with the same MinGW compiler under the ignored `output/deps`
-tree. Both dependency-free and mandatory-OpenCV configurations are verified.
-
-Digit recognition, confidence calibration, and an `unknown` decision remain to
-be implemented and evaluated before the milestone is complete.
+Stage 4 is complete. It establishes and tests the language boundary, adds
+optional OpenCV image decoding and quadrilateral rectification, and recognizes
+12 speed classes with an OpenCV random forest. A measured tree-vote threshold
+produces an explicit `unknown` result. CMake supports the mixed build without
+removing the original C-only path.
 
 ## Why keep both languages
 
 The image representation, basic transforms, red-region detector, and their
 tests remain C17. They form a small, dependency-free baseline with explicit
 ownership. C++17 is used only where it provides access to OpenCV's C++ API and
-where future recognition code is likely to need C++ libraries.
+where the recognition implementation needs C++ libraries.
 
 The boundary is `image_adapter.h`. Its declarations use only C-compatible
 types, and `extern "C"` suppresses C++ name mangling. OpenCV's `cv::Mat` never
@@ -40,6 +37,13 @@ traffic_sign_cpp_bridge (C++17 static library)
                  cpp/opencv_adapter.cpp + OpenCV core/imgcodecs/imgproc
                             |
                             +--> traffic_sign_assistant
+
+traffic_sign_recognizer (C++17 static library, when OpenCV is found)
+  cpp/recognizer.cpp + cpp/recognizer_features.cpp + OpenCV ml/imgproc
+          |
+          +--> traffic_sign_assistant
+          +--> test_recognizer
+          +--> traffic_sign_train_recognizer
 ```
 
 Each `.c` file is compiled as C17 and each `.cpp` file as C++17. CMake chooses
@@ -53,7 +57,7 @@ The original `build.ps1 -Test` remains the quickest dependency-free regression
 build. It invokes GCC directly and produces the PPM-only CLI in the repository
 root.
 
-The CMake path configures both languages and runs four tests:
+The CMake path configures both languages and runs four tests without OpenCV:
 
 ```powershell
 cmake -S . -B output/cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug
@@ -79,14 +83,14 @@ ctest --test-dir output/cmake-opencv --output-on-failure
 For the current MinGW environment, `tools/build_opencv.ps1` clones the official
 tagged source and creates the compiler-compatible static install under the
 ignored `output/deps` tree. It intentionally builds only `core`, `imgproc`, and
-`imgcodecs` plus their packaging dependencies.
+`imgcodecs`, and `ml` plus their packaging dependencies.
 
 The OpenCV installation must have been built for the same compiler ABI,
 architecture, and runtime as the application. The current verified configuration
 uses MinGW GCC 15.2.0 and a static OpenCV 4.13.0 install whose package directory
 is `output/deps/opencv-install/x64/mingw/staticlib`.
 
-The mandatory-OpenCV build passes five CTest targets. The OpenCV-specific suite
+The mandatory-OpenCV build passes six CTest targets. The OpenCV-specific suite
 contains 33 checks for exact 2-by-2 PNG decoding and RGB channel order, a known
 quadrilateral rectification, non-finite input rejection, and failure atomicity.
 A separate CLI smoke test loads a real 416-by-416 JPEG from the validation set.
@@ -100,14 +104,29 @@ channel swap is explicit and independently tested.
 `frame_normalize_quad` accepts four points ordered top-left, top-right,
 bottom-right, bottom-left. It computes a perspective transform and produces a
 caller-sized, front-facing RGB frame. The current detector returns an
-axis-aligned bounding box, not four reliable sign corners, so a later Stage 4
-slice must estimate the ring contour/corners before invoking this function in
-the automatic pipeline.
+axis-aligned bounding box, not four reliable sign corners, so a future accuracy
+refinement can estimate the ring contour/corners before invoking this function
+in the automatic pipeline.
 
-## Remaining milestone work
+## Recognition behavior
 
-1. Estimate sign geometry from each candidate and normalize its inner digit
-   region.
-2. Select and integrate a digit-recognition method.
-3. Calibrate confidence and return `unknown` below a measured threshold.
-4. Evaluate recognition on a frozen train/validation split and document errors.
+`recognizer.h` is a second plain-C boundary. The caller owns a `Frame` and
+`Candidate`; the opaque recognizer owns the loaded OpenCV `RTrees` model. The
+implementation removes one eighth of the candidate width/height from each side,
+resizes the interior to 20 by 20, equalizes grayscale contrast, and flattens it
+to 400 floating-point features. Training and runtime use the same feature code.
+
+The winning class is the forest class with the most tree votes. Confidence is
+that vote count divided by all tree votes, stored as per mille at the C boundary.
+The default threshold is 600. Results below it are `known=false` and speed 0;
+this threshold favors avoiding confident false readings over maximum coverage.
+
+## Deliberate limitations
+
+The automatic path currently uses an axis-aligned candidate interior. The
+four-point normalizer is tested and available, but the red-region detector does
+not yet return reliable corners to drive it. Automatic corner estimation is a
+future accuracy refinement rather than a blocker for the Stage 4 baseline.
+Tree-vote share is a useful rejection score but not a probabilistically
+calibrated confidence. See [STAGE4_RECOGNITION.md](STAGE4_RECOGNITION.md) for
+split metrics, end-to-end results, and dataset limitations.

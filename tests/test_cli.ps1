@@ -35,6 +35,11 @@ Check-Run @($inputImage, '--resize', '99999999999999999999999999', '2', '--outpu
 Check-Run @($inputImage, '--resize', '2') $false
 Check-Run @($inputImage, '--grayscale', '--grayscale', '--output', $resultImage) $false
 Check-Run @($inputImage, '--unknown') $false
+Check-Run @($inputImage, '--recognize', 'missing-model.yml') $false
+Check-Run @($inputImage, '--confidence', '600') $false
+Check-Run @($inputImage, '--detect', (Join-Path $testDirectory 'recognize'), '--recognize', 'missing-model.yml') $false
+Check-Run @($inputImage, '--detect', (Join-Path $testDirectory 'recognize'), '--recognize', 'missing-model.yml', '--confidence', '1001') $false
+Check-Run @($inputImage, '--detect', (Join-Path $testDirectory 'recognize'), '--recognize', 'missing-model.yml', '--confidence', '0', '--confidence', '1') $false
 Check-Run @($inputImage, '--output', (Join-Path $testDirectory 'missing/result.ppm')) $false
 Check-Run @((Join-Path $testDirectory 'missing.ppm')) $false
 # Synthetic ring: check actual detector artifacts, coordinates, and crop margin.
