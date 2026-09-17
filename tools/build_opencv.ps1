@@ -27,7 +27,7 @@ $configure = @(
     '-G', 'Ninja',
     '-DCMAKE_BUILD_TYPE=Release',
     ('-DCMAKE_INSTALL_PREFIX=' + $install.Replace('\', '/')),
-    '-DBUILD_LIST=core,imgproc,imgcodecs,ml',
+    '-DBUILD_LIST=core,imgproc,imgcodecs,ml,videoio',
     '-DBUILD_SHARED_LIBS=OFF',
     '-DBUILD_TESTS=OFF',
     '-DBUILD_PERF_TESTS=OFF',
@@ -38,7 +38,7 @@ $configure = @(
     '-DWITH_IPP=OFF',
     '-DWITH_ITT=OFF',
     '-DWITH_OPENCL=OFF',
-    '-DWITH_FFMPEG=OFF',
+    '-DWITH_FFMPEG=ON',
     '-DWITH_MSMF=OFF',
     '-DWITH_DSHOW=OFF',
     '-DWITH_ADE=OFF',
@@ -62,13 +62,20 @@ if ($python) {
 
 & cmake @configure
 if ($LASTEXITCODE -ne 0) { throw 'OpenCV configuration failed' }
+$variables = Get-Content (Join-Path $build 'CMakeVars.txt') -Raw
+if ($variables -notmatch '(?m)^HAVE_FFMPEG=TRUE\r?$') {
+    throw 'OpenCV configuration did not enable FFmpeg; inspect CMakeDownloadLog.txt'
+}
 
 # OpenCV 4.13 exports its internal static Protobuf target even with DNN excluded.
 # Build it before installation so the generated package is internally complete.
-& cmake --build $build --target opencv_imgcodecs opencv_ml libprotobuf --parallel $Jobs
+& cmake --build $build --target opencv_imgcodecs opencv_ml opencv_videoio libprotobuf --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'OpenCV build failed' }
 & cmake --build $build --target install --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'OpenCV installation failed' }
+$ffmpegWrapper = Get-ChildItem (Join-Path $install 'x64/mingw/bin') `
+    -Filter 'opencv_videoio_ffmpeg*_64.dll' -File -ErrorAction SilentlyContinue
+if (-not $ffmpegWrapper) { throw 'OpenCV FFmpeg runtime wrapper was not installed' }
 
 $package = Join-Path $install 'x64/mingw/staticlib'
 Write-Output "OpenCV $Version is ready. Configure this project with:"

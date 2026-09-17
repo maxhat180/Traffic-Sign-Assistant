@@ -94,7 +94,8 @@ int main()
     Recognition result = {};
     check(recognizer_predict(recognizer, &frame, &candidate, &result, &error),
           "synthetic candidate predicts");
-    check(result.known && result.speed == 30U && result.confidence >= 600U,
+    check(result.known && result.speed == 30U && result.predicted_speed == 30U &&
+          result.confidence >= 600U,
           "prediction reports speed and confidence");
 
     const Detection detection = {{}, {}, &candidate, 1U, 1U};

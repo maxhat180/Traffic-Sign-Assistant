@@ -56,8 +56,9 @@ bool predict_features(const Recognizer &recognizer, const cv::Mat &features,
          static_cast<unsigned int>(total_votes / 2)) /
         static_cast<unsigned int>(total_votes));
     result.confidence = confidence;
+    result.predicted_speed = static_cast<unsigned int>(label);
     result.known = confidence >= recognizer.min_confidence;
-    result.speed = result.known ? static_cast<unsigned int>(label) : 0U;
+    result.speed = result.known ? result.predicted_speed : 0U;
     error.clear();
     return true;
 }
@@ -172,7 +173,7 @@ extern "C" bool recognition_save(const Recognizer *recognizer,
         return false;
     }
     bool ok = std::fprintf(csv,
-        "id,x,y,width,height,speed,confidence,known\n") >= 0;
+        "id,x,y,width,height,speed,predicted_speed,confidence,known\n") >= 0;
     size_t known = 0;
     for (size_t i = 0; i < detection->count && ok; ++i) {
         Recognition result = {};
@@ -183,8 +184,9 @@ extern "C" bool recognition_save(const Recognizer *recognizer,
         }
         known += result.known ? 1U : 0U;
         const Candidate &box = detection->boxes[i];
-        ok = std::fprintf(csv, "%zu,%zu,%zu,%zu,%zu,%u,%.3f,%s\n",
+        ok = std::fprintf(csv, "%zu,%zu,%zu,%zu,%zu,%u,%u,%.3f,%s\n",
             i, box.x, box.y, box.width, box.height, result.speed,
+            result.predicted_speed,
             static_cast<double>(result.confidence) / 1000.0,
             result.known ? "true" : "false") >= 0;
     }

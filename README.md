@@ -1,9 +1,9 @@
 # Traffic Sign Assistant
 
 A C-first project toward detecting speed-limit signs from dashcam video.
-Milestones 1 through 4 are implemented: load and transform still images, locate
-red-bordered sign candidates in C17, and classify 12 speed limits with an
-OpenCV random forest behind a C API. Video decoding is the next milestone.
+Milestones 1 through 6 are implemented: load and transform still images, locate
+red-bordered sign candidates in C17, classify 12 speed limits, sample decoded
+video, and combine repeated observations into deduplicated sign events.
 
 See [PROGRESS.md](PROGRESS.md) for completed work and the proposed roadmap.
 
@@ -36,9 +36,9 @@ therefore suitable for an initial proof-of-concept model, but not by itself for
 reliable US- or Israel-specific detection. Regional dashcam data should be
 added for realistic evaluation and later fine-tuning.
 
-`archive/video.mp4` is a 16-second, 416 by 416, 30 FPS clip. Use it as a small
-video-decoding and end-to-end smoke-test input after MP4 support is implemented;
-do not treat it as a representative real-world driving benchmark.
+`archive/video.mp4` is a 16.9-second, 416 by 416, 30 FPS clip. Stage 5 uses it as
+a video-decoding and end-to-end smoke-test input; it is not a representative
+real-world driving benchmark.
 
 The dataset declares a CC BY 4.0 license, so uses of the data must retain the
 required attribution. Its `data.yaml` paths do not match the extracted folder
@@ -141,8 +141,9 @@ ctest --test-dir output/cmake-opencv --output-on-failure
 ```
 
 The helper downloads the official tagged source and builds only the modules used
-here (`core`, `imgproc`, `imgcodecs`, and `ml`). Source, build products, and the
-local install stay under ignored `output/`.
+here (`core`, `imgproc`, `imgcodecs`, `ml`, and `videoio`) plus OpenCV's pinned
+Windows FFmpeg wrapper. Source, build products, runtime DLLs, and the local
+install stay under ignored `output/`.
 
 The OpenCV binaries must match the selected compiler, architecture, and runtime.
 In particular, an MSVC-built Windows package cannot be linked safely into this
@@ -169,9 +170,64 @@ Then run detection and recognition together:
 
 `--confidence` is the minimum winning-tree vote share in per mille (`0..1000`)
 and defaults to 600. In addition to detector artifacts, recognition writes
-`PREFIX-recognition.csv` with each candidate's box, speed, confidence, and
-known/unknown decision. Unknown rows use speed 0. The current recognizer uses a
-20-by-20 equalized grayscale feature vector from the inner candidate crop.
+`PREFIX-recognition.csv` with each candidate's box, accepted speed, raw winning
+class, confidence, and known/unknown decision. Unknown rows use speed 0 while
+`predicted_speed` is retained for temporal aggregation. The current recognizer
+uses a 20-by-20 equalized grayscale feature vector from the inner candidate crop.
+
+### Process video (Stage 5)
+
+Run the complete detector and recognizer on one sampled frame per second:
+
+```powershell
+.\output\cmake-opencv\traffic_sign_video.exe `
+  .\archive\video.mp4 `
+  .\output\video-run `
+  --recognize .\output\speed-recognizer.yml `
+  --sample-ms 1000
+```
+
+The output directory is created automatically. `frames.csv` contains one row
+per sampled frame, while `recognition.csv` contains every candidate prediction
+with its source-frame index, timestamp, and assigned track ID. Each sampled frame also receives the
+same `frame-NNNNNN-raw.ppm`, `-clean.ppm`, `-boxes.ppm`, `-boxes.csv`, and crop
+artifacts as still-image detection. Prefer a new output directory for each run;
+matching names are overwritten but stale crops from an older run are not removed.
+
+`--sample-ms N` defaults to 1000. `--max-samples N` stops after N sampled frames;
+zero or omission processes through the end. Recognition is optional, and all
+Stage 3 detector thresholds can be overridden with the same option names. For
+example, inspect the aggregate predictions and one annotated frame with:
+
+```powershell
+Import-Csv .\output\video-run\recognition.csv | Format-Table
+.\tools\preview_ppm.ps1 `
+  -InputPath .\output\video-run\frame-000000-boxes.ppm `
+  -OutputPath .\output\video-run\frame-000000-boxes.png
+```
+
+Frames are decoded sequentially even when only some are processed. See
+[Stage 5 video processing](docs/STAGE5_VIDEO.md) for the decoder API design,
+verification, and limitations.
+
+### Temporal tracking (Stage 6)
+
+The video command now also writes `tracks.csv` for every spatial track and
+`events.csv` for confirmed, deduplicated speed readings. By default, candidates
+join when their boxes overlap by at least 10% IoU, tracks tolerate a gap of twice
+the sampling interval, and an event requires at least two observations of the
+same raw speed with at least 50% mean confidence.
+
+```powershell
+Import-Csv .\output\video-run\events.csv | Format-Table * -AutoSize
+```
+
+The policy is configurable with `--track-iou N`, `--track-gap-ms N`,
+`--confirm-hits N`, and `--track-confidence N`; IoU and confidence use per-mille
+integers. Requiring repeated evidence suppresses isolated confident mistakes but
+can miss real signs detected in only one sampled frame. Use a shorter interval,
+such as `--sample-ms 250`, when temporal confirmation matters. See
+[Stage 6 tracking](docs/STAGE6_TRACKING.md) for the algorithm and evaluation.
 
 The included 2-by-2 fixture has these RGB values in row order:
 `(82,71,66)`, `(49,50,51)`, `(97,98,99)`, `(100,101,102)`.
@@ -352,6 +408,11 @@ cpp/recognizer_features.cpp    inner-crop grayscale feature extraction
 cpp/recognizer.cpp             C API over OpenCV random-forest inference
 cpp/train_recognizer.cpp       dataset loader, trainer, and crop evaluation
 recognizer.h                    C-compatible recognition boundary
+video_adapter.h                 C-compatible sequential video reader API
+cpp/video_adapter.cpp           OpenCV VideoCapture to owned RGB frames
+cpp/video_main.cpp              sampling and still-pipeline orchestration
+cpp/tracker.cpp                 IoU association and temporal evidence
+cpp/tracker.hpp                 C++ tracker input/output structures
 tools/build_opencv.ps1         reproducible local MinGW OpenCV dependency build
 tools/evaluate_recognition.ps1 frozen end-to-end Stage 4 evaluation
 tests/*.c                      C regression tests
@@ -359,9 +420,10 @@ tests/test_image_bridge.cpp    C++ ABI, channel-order, stride, ownership test
 CMakeLists.txt                 mixed build and optional dependency discovery
 ```
 
-OpenCV types do not cross `image_adapter.h`. The exported functions use plain C
-structures and `extern "C"`, while C++ exceptions are caught inside the adapter
-and converted to the existing static error-string convention. See
+OpenCV types do not cross `image_adapter.h` or `video_adapter.h`. The exported
+functions use plain C structures and `extern "C"`, while C++ exceptions are
+caught inside the adapters and converted to the existing static error-string
+convention. See
 [`docs/STAGE4_ARCHITECTURE.md`](docs/STAGE4_ARCHITECTURE.md) for the target graph
 and build modes.
 
@@ -410,6 +472,12 @@ When OpenCV is enabled, `tests/test_opencv_adapter.cpp` adds 33 checks for exact
 PNG decoding, RGB preservation, a known perspective rectification, invalid
 corner data, and failure atomicity. `tests/test_recognizer.cpp` trains a small
 synthetic forest and verifies feature extraction, model loading, C inference,
-confidence, CSV output, and invalid thresholds. The locally built OpenCV 4.13.0
-configuration passes all six CTest targets and also loads a real 416-by-416
-dataset JPEG.
+confidence, CSV output, and invalid thresholds. `tests/test_video_adapter.cpp`
+checks sequential frame indexes, end-of-stream, metadata, and exact BGR-to-RGB
+pixels using a generated lossless image sequence. `tests/test_tracker.cpp`
+checks association, expiration, conflicting labels, single-frame rejection, and
+multi-frame confirmation. The locally built OpenCV 4.13.0 configuration passes
+all eight CTest targets, loads a real dataset JPEG, and decodes all 508 frames of
+the included MP4. At 250 ms sampling, that clip produces five one-frame tracks
+and zero confirmed events; a repeated three-frame 30-sign sequence produces one
+confirmed event rather than three reports.

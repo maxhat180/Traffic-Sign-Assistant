@@ -10,7 +10,8 @@ extern "C" {
 typedef struct Recognizer Recognizer;
 
 typedef struct {
-    unsigned int speed;
+    unsigned int speed;           /* Accepted speed, or zero when unknown. */
+    unsigned int predicted_speed; /* Winning class before thresholding. */
     unsigned int confidence; /* Winning tree-vote share, per mille. */
     bool known;
 } Recognition;
@@ -24,7 +25,9 @@ bool recognizer_predict(const Recognizer *recognizer, const Frame *source,
                         const Candidate *candidate, Recognition *out,
                         const char **error);
 
-/* Save prefix-recognition.csv for every candidate. Unknown rows use speed 0. */
+/* Save prefix-recognition.csv for every candidate. Unknown rows use speed 0,
+ * while predicted_speed retains the winning class for temporal aggregation.
+ */
 bool recognition_save(const Recognizer *recognizer, const Frame *source,
                       const Detection *detection, const char *prefix,
                       size_t *known_count, const char **error);

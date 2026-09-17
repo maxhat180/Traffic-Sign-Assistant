@@ -82,8 +82,9 @@ ctest --test-dir output/cmake-opencv --output-on-failure
 
 For the current MinGW environment, `tools/build_opencv.ps1` clones the official
 tagged source and creates the compiler-compatible static install under the
-ignored `output/deps` tree. It intentionally builds only `core`, `imgproc`, and
-`imgcodecs`, and `ml` plus their packaging dependencies.
+ignored `output/deps` tree. The current helper builds `core`, `imgproc`,
+`imgcodecs`, `ml`, and the Stage 5 `videoio` module plus their packaging
+dependencies.
 
 The OpenCV installation must have been built for the same compiler ABI,
 architecture, and runtime as the application. The current verified configuration
@@ -118,8 +119,9 @@ to 400 floating-point features. Training and runtime use the same feature code.
 
 The winning class is the forest class with the most tree votes. Confidence is
 that vote count divided by all tree votes, stored as per mille at the C boundary.
-The default threshold is 600. Results below it are `known=false` and speed 0;
-this threshold favors avoiding confident false readings over maximum coverage.
+The default threshold is 600. Results below it are `known=false` and speed 0,
+while `predicted_speed` retains the winning class for Stage 6 aggregation. This
+threshold favors avoiding confident false readings over maximum coverage.
 
 ## Deliberate limitations
 
