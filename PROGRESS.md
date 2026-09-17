@@ -4,9 +4,9 @@ Last updated: 2026-09-17
 
 ## Current status
 
-Milestones 1 through 6 are complete. Video candidates are associated spatially
-over time, raw recognition evidence is aggregated, and only repeated consistent
-readings become deduplicated events. Stage 7 evaluation and packaging is next.
+Milestones 1 through 7 are complete. Labeled-video evaluation now scores final
+events, recognition, unknowns, latency, and throughput; a packaged demo presents
+confirmed events while retaining detailed diagnostic artifacts.
 
 ## Milestones
 
@@ -24,7 +24,7 @@ readings become deduplicated events. Stage 7 evaluation and packaging is next.
   still-image pipeline.
 - [x] **6. Track results over time.** Combine detections across frames to reduce
   flickering and repeated reports.
-- [ ] **7. Evaluate and package.** Measure accuracy and processing speed on
+- [x] **7. Evaluate and package.** Measure accuracy and processing speed on
   labeled examples, document limitations, and prepare a reproducible demo.
 
 ## Milestone 1 verification
@@ -157,8 +157,39 @@ See [README.md](README.md) for input constraints and memory ownership details.
 - Limitations: axis-aligned IoU can lose fast-moving or non-overlapping signs;
   confirmation favors precision over recall; defaults have only smoke-test
   validation and need a labeled video benchmark in Stage 7.
-- Next: Stage 7 benchmark end-to-end accuracy and latency, tune tracking on
-  labeled videos, and package a reproducible demonstration.
+- Stage 7 subsequently added the benchmark contract and demo packaging.
+
+## Stage 7 verification
+
+- Added a versioned timestamped-box annotation schema and split-aware manifest.
+  The manifest intentionally has no ground-truth row for the unlabeled included
+  MP4, so smoke observations cannot be mistaken for accuracy results.
+- Added a video evaluator with greedy spatial/temporal track matching and
+  event TP/FP/FN, precision/recall/F1, recognition accuracy, unknown-observation,
+  detection/confirmation-latency, and throughput reports.
+- Tracks now retain the first confirmation time for the final winning speed.
+  The video CLI also writes a human-readable `confirmed-events.txt` and a
+  machine-readable `run-summary.csv` without removing any diagnostic CSV.
+- Added a PowerShell demo runner that uses fresh outputs, prints confirmed
+  events, and locates recognition, track, event, frame, and timing artifacts.
+- Added a dependency-free synthetic evaluator regression covering matching,
+  unknowns, latency, throughput, and multiclass TP/FP/FN accounting.
+- Fresh strict builds pass six dependency-free and nine OpenCV CTest targets.
+  The legacy suite still passes 437 core checks, 23 CLI cases, and 32 detector
+  checks. The frozen 12-image validation recognition evaluation reproduced
+  7/10 localized signs and 3/3 correct accepted localized predictions.
+- A fresh 250 ms smoke run of the unlabeled MP4 decoded 508 frames, sampled 68,
+  found five isolated candidates, confirmed no events, and ran at 504 decoded
+  frames/s (16.8x video time) in the local Release build. A fresh three-frame
+  repeated validation sequence confirmed one speed-30 event after 40 ms with
+  three observations and 0.76 mean confidence. These are pipeline checks, not
+  video-level accuracy measurements.
+- No video-level accuracy is claimed until independently labeled videos are
+  added. Detection recall, greedy IoU track splitting, nearby-candidate identity
+  errors, dataset bias, and hardware-dependent throughput remain documented.
+- Suggested next stage: collect and double-review regional dashcam annotations,
+  freeze train/validation/test drives, establish the baseline, then compare a
+  motion-aware tracker and a higher-recall detector without tuning on test data.
 
 ## Update convention
 

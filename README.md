@@ -1,11 +1,14 @@
 # Traffic Sign Assistant
 
 A C-first project toward detecting speed-limit signs from dashcam video.
-Milestones 1 through 6 are implemented: load and transform still images, locate
+Milestones 1 through 7 are implemented: load and transform still images, locate
 red-bordered sign candidates in C17, classify 12 speed limits, sample decoded
-video, and combine repeated observations into deduplicated sign events.
+video, combine repeated observations into deduplicated sign events, and evaluate
+labeled videos with reproducible metrics and demo packaging.
 
-See [PROGRESS.md](PROGRESS.md) for completed work and the proposed roadmap.
+See [PROGRESS.md](PROGRESS.md) for completed work and the proposed roadmap. For
+copy-paste verification commands covering every current build and evaluation
+path, see [Testing the current project](docs/TESTING.md).
 
 ## Dataset assets
 
@@ -229,6 +232,36 @@ can miss real signs detected in only one sampled frame. Use a shorter interval,
 such as `--sample-ms 250`, when temporal confirmation matters. See
 [Stage 6 tracking](docs/STAGE6_TRACKING.md) for the algorithm and evaluation.
 
+### Video evaluation and demo (Stage 7)
+
+Run a video into a fresh timestamped output directory and print confirmed events
+plus the locations of all detailed artifacts:
+
+```powershell
+.\tools\run_video_demo.ps1 -Video .\archive\video.mp4
+```
+
+The video command now writes `confirmed-events.txt` and `run-summary.csv` in
+addition to the Stage 5/6 CSVs. The former is a compact human-readable event
+report; the latter records elapsed time, decoded-frame throughput, sampled-frame
+throughput, and real-time factor.
+
+Quantitative video evaluation requires independently labeled videos in
+`evaluation/video-manifest.csv` using the timestamped-box JSON schema under
+`evaluation/`. The tracked manifest is intentionally empty: the included
+`archive/video.mp4` is not treated as ground truth.
+
+```powershell
+.\tools\evaluate_video.ps1 -Split test `
+  -OutputDirectory .\output\video-evaluation-test-fresh
+```
+
+The report includes event TP/FP/FN, precision/recall/F1, recognition accuracy,
+unknown observations, detection/confirmation latency, and throughput. Tune on
+training/validation videos only and keep the test split frozen. See
+[Stage 7 evaluation](docs/STAGE7_EVALUATION.md) for metric definitions,
+annotation procedure, and benchmark limitations.
+
 The included 2-by-2 fixture has these RGB values in row order:
 `(82,71,66)`, `(49,50,51)`, `(97,98,99)`, `(100,101,102)`.
 Its binary samples happen to be printable ASCII bytes. The final newline is
@@ -415,6 +448,9 @@ cpp/tracker.cpp                 IoU association and temporal evidence
 cpp/tracker.hpp                 C++ tracker input/output structures
 tools/build_opencv.ps1         reproducible local MinGW OpenCV dependency build
 tools/evaluate_recognition.ps1 frozen end-to-end Stage 4 evaluation
+tools/evaluate_video.ps1       labeled Stage 7 event evaluation
+tools/run_video_demo.ps1       packaged video demo and artifact locator
+evaluation/                    labeled-video manifest and JSON schema
 tests/*.c                      C regression tests
 tests/test_image_bridge.cpp    C++ ABI, channel-order, stride, ownership test
 CMakeLists.txt                 mixed build and optional dependency discovery

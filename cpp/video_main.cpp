@@ -4,6 +4,7 @@
 #include "tracker.hpp"
 
 #include <charconv>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -208,10 +209,12 @@ int main(int argc, char **argv)
                   << video_info.frames_per_second
                   << " estimated_frames=" << video_info.estimated_frame_count << '\n';
 
+        const auto processing_start = std::chrono::steady_clock::now();
         size_t sample = 0;
         size_t decoded = 0;
         size_t total_candidates = 0;
         size_t total_known = 0;
+        double last_decoded_timestamp_ms = 0.0;
         double next_sample_ms = 0.0;
         while (options.max_samples == 0 || sample < options.max_samples) {
             Frame frame = {};
@@ -226,6 +229,7 @@ int main(int argc, char **argv)
                     "could not decode video frame" : error);
             }
             ++decoded;
+            last_decoded_timestamp_ms = frame_info.timestamp_ms;
             if (frame_info.timestamp_ms + 0.001 < next_sample_ms) {
                 frame_destroy(&frame);
                 continue;
@@ -312,13 +316,18 @@ int main(int argc, char **argv)
         const std::vector<TrackSummary> tracks = tracker.summaries();
         std::ofstream track_output(options.output_directory / "tracks.csv");
         std::ofstream events(options.output_directory / "events.csv");
+        std::ofstream event_report(options.output_directory / "confirmed-events.txt");
         require_stream(track_output, "could not open track summary");
         require_stream(events, "could not open event summary");
+        require_stream(event_report, "could not open confirmed event report");
         const char *track_header = "track_id,start_frame,end_frame,start_ms,end_ms,"
                                    "observations,speed,speed_observations,"
-                                   "mean_confidence,confirmed\n";
+                                   "mean_confidence,confirmation_ms,confirmed\n";
         track_output << track_header;
         events << "event_id," << track_header;
+        event_report << std::fixed
+                     << "Confirmed speed-limit events\n"
+                     << "speed  first_seen_s  confirmed_s  last_seen_s  observations  confidence\n";
         size_t event_count = 0;
         for (const TrackSummary &track : tracks) {
             std::ostringstream row;
@@ -326,21 +335,66 @@ int main(int argc, char **argv)
                 << std::fixed << std::setprecision(3) << track.start_ms << ','
                 << track.end_ms << ',' << track.observations << ',' << track.speed << ','
                 << track.speed_observations << ','
-                << static_cast<double>(track.mean_confidence) / 1000.0 << ','
+                << static_cast<double>(track.mean_confidence) / 1000.0 << ',';
+            if (track.confirmed) {
+                row << track.confirmation_ms;
+            }
+            row << ','
                 << (track.confirmed ? "true" : "false") << '\n';
             track_output << row.str();
             if (track.confirmed) {
                 events << event_count++ << ',' << row.str();
+                event_report << std::setw(5) << track.speed << "  "
+                             << std::setw(12) << std::setprecision(3)
+                             << track.start_ms / 1000.0 << "  "
+                             << std::setw(11) << track.confirmation_ms / 1000.0
+                             << "  " << std::setw(11) << track.end_ms / 1000.0
+                             << "  " << std::setw(12) << track.observations
+                             << "  " << std::setprecision(3)
+                             << static_cast<double>(track.mean_confidence) / 1000.0
+                             << '\n';
             }
+        }
+        if (event_count == 0U) {
+            event_report << "No confirmed events.\n";
         }
         track_output.flush();
         events.flush();
+        event_report.flush();
         require_stream(track_output, "could not finalize track summary");
         require_stream(events, "could not finalize event summary");
+        require_stream(event_report, "could not finalize confirmed event report");
+        const auto processing_end = std::chrono::steady_clock::now();
+        const double elapsed_ms = std::chrono::duration<double, std::milli>(
+            processing_end - processing_start).count();
+        const double elapsed_seconds = elapsed_ms / 1000.0;
+        std::ofstream run_summary(options.output_directory / "run-summary.csv");
+        require_stream(run_summary, "could not open run summary");
+        run_summary << "decoded_frames,samples,candidates,accepted_predictions,"
+                       "confirmed_events,video_duration_ms,elapsed_ms,decoded_fps,"
+                       "samples_per_second,realtime_factor\n"
+                    << decoded << ',' << sample << ',' << total_candidates << ','
+                    << total_known << ',' << event_count << ',' << std::fixed
+                    << std::setprecision(3) << last_decoded_timestamp_ms << ','
+                    << elapsed_ms << ','
+                    << (elapsed_seconds > 0.0 ?
+                        static_cast<double>(decoded) / elapsed_seconds : 0.0) << ','
+                    << (elapsed_seconds > 0.0 ?
+                        static_cast<double>(sample) / elapsed_seconds : 0.0) << ','
+                    << (elapsed_ms > 0.0 ? last_decoded_timestamp_ms / elapsed_ms : 0.0)
+                    << '\n';
+        run_summary.flush();
+        require_stream(run_summary, "could not finalize run summary");
         std::cout << "Decoded: " << decoded << "\nSamples: " << sample
                   << "\nCandidates: " << total_candidates
                   << "\nAccepted predictions: " << total_known
-                  << "\nConfirmed events: " << event_count << '\n';
+                  << "\nConfirmed events: " << event_count
+                  << "\nThroughput: " << std::fixed << std::setprecision(2)
+                  << (elapsed_seconds > 0.0 ?
+                      static_cast<double>(decoded) / elapsed_seconds : 0.0)
+                  << " decoded frames/s\nEvent report: "
+                  << (options.output_directory / "confirmed-events.txt").string()
+                  << '\n';
         return EXIT_SUCCESS;
     } catch (const std::exception &exception) {
         std::cerr << "Video processing failed: " << exception.what() << '\n';

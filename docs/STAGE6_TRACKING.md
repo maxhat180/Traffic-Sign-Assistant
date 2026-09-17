@@ -51,7 +51,7 @@ different 0.80 readings do not confirm either because neither speed has two hits
 
 - `recognition.csv` adds `track_id` and `predicted_speed` to every candidate.
 - `tracks.csv` records every track's frame/time span, total observations, winning
-  speed evidence, mean confidence, and confirmation decision.
+  speed evidence, mean confidence, first confirmation time, and final decision.
 - `events.csv` contains only confirmed tracks, with one row per physical track.
 
 These files are finalized at end-of-stream. Stage 6 does not yet stream events

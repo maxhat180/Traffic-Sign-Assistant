@@ -2,6 +2,7 @@ param(
     [ValidateSet('train','valid','test')][string]$Split = 'valid',
     [string]$Executable,
     [string]$Model,
+    [string]$OutputDirectory,
     [ValidateRange(0,1000)][int]$Confidence = 600,
     [int]$MinArea = 120,
     [int]$MinSide = 12,
@@ -24,7 +25,11 @@ if (-not (Test-Path -LiteralPath $Model -PathType Leaf)) {
 }
 
 $dataset = Join-Path $projectRoot "archive/car/$Split"
-$destination = Join-Path $projectRoot "output/recognition-$Split-c$Confidence"
+$destination = if ($OutputDirectory) {
+    [IO.Path]::GetFullPath($OutputDirectory)
+} else {
+    Join-Path $projectRoot "output/recognition-$Split-c$Confidence"
+}
 [void](New-Item -ItemType Directory -Force -Path $destination)
 $culture = [Globalization.CultureInfo]::InvariantCulture
 $speeds = @(10,100,110,120,20,30,40,50,60,70,80,90)

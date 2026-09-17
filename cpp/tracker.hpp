@@ -24,6 +24,7 @@ struct TrackSummary {
     unsigned int speed;
     size_t speed_observations;
     unsigned int mean_confidence;
+    double confirmation_ms;
     bool confirmed;
 };
 
@@ -40,7 +41,7 @@ public:
 
 private:
     struct Track;
-    static void add_evidence(Track &track, const TrackObservation &observation);
+    void add_evidence(Track &track, const TrackObservation &observation);
     unsigned int minimum_iou_;
     double maximum_gap_ms_;
     size_t confirmation_hits_;

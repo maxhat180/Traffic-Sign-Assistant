@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TrafficSignAssistant VERSION 0.6.0 LANGUAGES C CXX)
+project(TrafficSignAssistant VERSION 0.7.0 LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -149,5 +149,8 @@ if(BUILD_TESTING)
         add_test(NAME cli COMMAND ${POWERSHELL_EXECUTABLE} -NoProfile
             -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli.ps1
             -Executable $<TARGET_FILE:traffic_sign_assistant>)
+        add_test(NAME video_evaluation COMMAND ${POWERSHELL_EXECUTABLE} -NoProfile
+            -ExecutionPolicy Bypass
+            -File ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_video_evaluation.ps1)
     endif()
 endif()

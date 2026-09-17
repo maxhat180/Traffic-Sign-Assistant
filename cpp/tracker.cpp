@@ -8,6 +8,12 @@
 #include <utility>
 
 struct TemporalTracker::Track {
+    struct Evidence {
+        size_t hits = 0U;
+        unsigned long long confidence_sum = 0U;
+        double confirmation_ms = -1.0;
+    };
+
     size_t id;
     size_t start_frame;
     size_t end_frame;
@@ -16,7 +22,7 @@ struct TemporalTracker::Track {
     Candidate last_box;
     size_t observations;
     bool active;
-    std::map<unsigned int, std::pair<size_t, unsigned long long>> evidence;
+    std::map<unsigned int, Evidence> evidence;
 };
 
 TemporalTracker::~TemporalTracker() = default;
@@ -62,13 +68,20 @@ void TemporalTracker::add_evidence(Track &track,
     ++track.observations;
     if (observation.predicted_speed != 0U) {
         auto &entry = track.evidence[observation.predicted_speed];
-        if (entry.first == std::numeric_limits<size_t>::max() ||
-            entry.second > std::numeric_limits<unsigned long long>::max() -
-                               observation.confidence) {
+        if (entry.hits == std::numeric_limits<size_t>::max() ||
+            entry.confidence_sum >
+                std::numeric_limits<unsigned long long>::max() -
+                    observation.confidence) {
             throw std::overflow_error("tracker confidence sum overflow");
         }
-        ++entry.first;
-        entry.second += observation.confidence;
+        ++entry.hits;
+        entry.confidence_sum += observation.confidence;
+        const unsigned int mean = static_cast<unsigned int>(
+            (entry.confidence_sum + entry.hits / 2U) / entry.hits);
+        if (entry.confirmation_ms < 0.0 && entry.hits >= confirmation_hits_ &&
+            mean >= confirmation_confidence_) {
+            entry.confirmation_ms = observation.timestamp_ms;
+        }
     }
 }
 
@@ -174,11 +187,12 @@ std::vector<TrackSummary> TemporalTracker::summaries() const
         size_t best_hits = 0;
         unsigned long long best_confidence_sum = 0;
         for (const auto &[speed, evidence] : track.evidence) {
-            if (evidence.second > best_confidence_sum ||
-                (evidence.second == best_confidence_sum && evidence.first > best_hits)) {
+            if (evidence.confidence_sum > best_confidence_sum ||
+                (evidence.confidence_sum == best_confidence_sum &&
+                 evidence.hits > best_hits)) {
                 best_speed = speed;
-                best_hits = evidence.first;
-                best_confidence_sum = evidence.second;
+                best_hits = evidence.hits;
+                best_confidence_sum = evidence.confidence_sum;
             }
         }
         const unsigned int mean = best_hits == 0U ? 0U :
@@ -186,9 +200,11 @@ std::vector<TrackSummary> TemporalTracker::summaries() const
                                       best_hits);
         const bool confirmed = best_speed != 0U && best_hits >= confirmation_hits_ &&
                                mean >= confirmation_confidence_;
+        const double confirmation_ms = confirmed ?
+            track.evidence.at(best_speed).confirmation_ms : -1.0;
         result.push_back({track.id, track.start_frame, track.end_frame,
                           track.start_ms, track.end_ms, track.observations,
-                          best_speed, best_hits, mean, confirmed});
+                          best_speed, best_hits, mean, confirmation_ms, confirmed});
     }
     return result;
 }

@@ -39,7 +39,8 @@ int main()
     check(ids[0] == 0U, "overlapping observation joins existing track");
     summary = tracker.summaries()[0];
     check(summary.confirmed && summary.speed == 20U &&
-          summary.speed_observations == 2U && summary.mean_confidence == 600U,
+          summary.speed_observations == 2U && summary.mean_confidence == 600U &&
+          summary.confirmation_ms == 250.0,
           "consistent evidence confirms mean confidence");
 
     ids = tracker.update({observation(2U, 500.0, 100U, 30U, 900U)});
@@ -59,7 +60,8 @@ int main()
     TemporalTracker unknown_votes(100U, 600.0, 2U, 500U);
     unknown_votes.update({observation(0U, 0.0, 10U, 50U, 550U)});
     unknown_votes.update({observation(1U, 250.0, 11U, 50U, 550U)});
-    check(unknown_votes.summaries()[0].confirmed,
+    check(unknown_votes.summaries()[0].confirmed &&
+          unknown_votes.summaries()[0].confirmation_ms == 250.0,
           "repeated sub-frame-threshold predictions can confirm temporally");
 
     bool rejected = false;
